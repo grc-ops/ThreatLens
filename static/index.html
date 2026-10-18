@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ThreatLens - IOC triage</title>
+<style>
+:root{
+  --ink:#0d1520; --panel:#142031; --panel2:#192840; --line:#26364d; --text:#dce5f0; --muted:#8397ad;
+  --link:#7fb4ff; --mal:#f2616f; --sus:#f0a43c; --low:#d9c365; --clean:#4cc2a5; --unk:#6d7f95;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html{color-scheme:dark}
+body{margin:0;background:var(--ink);color:var(--text);font:14px/1.45 var(--sans)}
+a{color:var(--link);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--link);outline-offset:2px;border-radius:4px}
+button,input,select,textarea{font:inherit;color:inherit}
+header.top{display:flex;gap:18px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  padding:14px 24px;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{display:flex;align-items:baseline;gap:12px}
+.brand h1{margin:0;font-size:20px;letter-spacing:.2px}
+.brand span{color:var(--muted);font-size:13px}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.pill{border:1px solid var(--line);background:transparent;border-radius:999px;padding:3px 10px;font-size:12px;cursor:pointer;color:var(--muted)}
+.pill.on{border-color:var(--clean);color:var(--text);background:rgba(76,194,165,.12)}
+.pill.off{opacity:.55}
+.pill.missing{border-style:dashed;cursor:help;opacity:.45}
+main{max-width:1480px;margin:0 auto;padding:20px 24px 60px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px}
+textarea#input{width:100%;min-height:130px;resize:vertical;background:var(--ink);border:1px solid var(--line);border-radius:6px;
+  padding:10px 12px;font-family:var(--mono);font-size:13px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.btn{border:1px solid var(--line);background:var(--panel2);border-radius:6px;padding:7px 14px;cursor:pointer}
+.btn:hover{border-color:var(--link)}
+.btn.primary{background:var(--link);color:#06101d;border-color:var(--link);font-weight:600}
+.btn.small{padding:3px 9px;font-size:12px}
+.muted{color:var(--muted)}
+.progress{margin-top:12px;display:flex;gap:12px;align-items:center}
+.progress .track{flex:1;height:6px;background:var(--ink);border-radius:3px;overflow:hidden}
+.progress .track i{display:block;height:100%;width:0;background:var(--link);transition:width .2s}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:18px 0 12px}
+.stat{background:var(--panel);border:1px solid var(--line);border-left-width:4px;border-radius:6px;padding:10px 12px;cursor:pointer;text-align:left}
+.stat b{display:block;font-size:24px;font-family:var(--mono);line-height:1.1}
+.stat.active{background:var(--panel2);border-color:var(--link)}
+.s-malicious{border-left-color:var(--mal)} .s-suspicious{border-left-color:var(--sus)} .s-low{border-left-color:var(--low)}
+.s-clean{border-left-color:var(--clean)} .s-unknown{border-left-color:var(--unk)} .s-all{border-left-color:var(--link)}
+.filters{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;padding:12px 14px;margin-bottom:12px}
+.fg{display:flex;flex-direction:column;gap:5px}
+.fg>label,.fg>span.lbl{font-size:12px;color:var(--muted)}
+.seg{display:flex;gap:4px;flex-wrap:wrap}
+.seg button{border:1px solid var(--line);background:transparent;border-radius:5px;padding:3px 10px;cursor:pointer;color:var(--muted)}
+.seg button.on{background:var(--panel2);color:var(--text);border-color:var(--link)}
+.seg button em{font-style:normal;font-family:var(--mono);font-size:11px;margin-left:5px;opacity:.8}
+.range{display:flex;gap:8px;align-items:center}
+.range input[type=range]{width:120px;accent-color:var(--link)}
+.range output{font-family:var(--mono);min-width:26px;text-align:right}
+input[type=search],select{background:var(--ink);border:1px solid var(--line);border-radius:5px;padding:5px 8px}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+table{width:100%;border-collapse:collapse;min-width:900px}
+th{position:sticky;top:0;background:var(--panel2);text-align:left;font-weight:600;font-size:12px;color:var(--muted);padding:9px 12px;border-bottom:1px solid var(--line)}
+td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr.main:hover td{background:rgba(127,180,255,.04)}
+tr.detail td{background:var(--panel);padding:14px 18px 18px}
+.ioc{font-family:var(--mono);font-size:12.5px;word-break:break-all;max-width:420px}
+.type{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--muted)}
+.score{display:flex;align-items:center;gap:10px;min-width:150px}
+.score .num{font-family:var(--mono);font-size:22px;font-weight:700;width:42px;text-align:right;line-height:1}
+.meter{flex:1;height:6px;background:var(--ink);border-radius:3px;overflow:hidden}
+.meter i{display:block;height:100%}
+.c-malicious{color:var(--mal)} .c-suspicious{color:var(--sus)} .c-low{color:var(--low)} .c-clean{color:var(--clean)}
+.c-unknown,.c-internal,.c-error{color:var(--unk)}
+.m-malicious{background:var(--mal)} .m-suspicious{background:var(--sus)} .m-low{background:var(--low)} .m-clean{background:var(--clean)}
+.verdict{font-weight:600;text-transform:capitalize}
+.chips{display:flex;gap:5px;flex-wrap:wrap}
+.chip{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:5px;padding:2px 7px;font-size:12px;color:var(--text);background:var(--ink)}
+.chip b{color:var(--muted);font-weight:600}
+.chip:hover{text-decoration:none;border-color:var(--link)}
+.chip.b-malicious{border-color:var(--mal);background:rgba(242,97,111,.12)}
+.chip.b-suspicious{border-color:var(--sus);background:rgba(240,164,60,.12)}
+.chip.b-low{border-color:var(--low)}
+.chip.b-clean{border-color:rgba(76,194,165,.55)}
+.chip.b-none{color:var(--muted)}
+.chip.b-err{border-style:dashed;color:var(--sus)}
+.x{background:none;border:0;cursor:pointer;color:var(--muted);padding:2px 6px;border-radius:4px}
+.x:hover{color:var(--text);background:var(--panel2)}
+.dgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+.dbox{border:1px solid var(--line);border-radius:6px;padding:10px 12px;background:var(--ink)}
+.dbox h4{margin:0 0 4px;font-size:13px;display:flex;justify-content:space-between;gap:8px}
+.dbox p{margin:0 0 6px;color:var(--muted);font-size:12.5px}
+.dbox dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:12px}
+.dbox dt{color:var(--muted)} .dbox dd{margin:0;word-break:break-word}
+.pivots{margin-top:12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.empty{padding:34px;text-align:center;color:var(--muted)}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--link);padding:8px 16px;border-radius:6px;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.show{opacity:1}
+.note{font-size:12px;color:var(--muted);margin-top:8px}
+
+.tabs{display:flex;gap:4px}
+.tab{background:transparent;border:1px solid transparent;border-radius:6px;padding:6px 14px;cursor:pointer;color:var(--muted);font-weight:600}
+.tab[aria-selected=true]{background:var(--panel2);border-color:var(--line);color:var(--text)}
+.seg button.missing{border-style:dashed;opacity:.5;cursor:help}.srcs{margin-top:10px}.srcs summary{cursor:pointer;color:var(--muted)}.srcs .seg{margin-top:8px}
+.ncard{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-top:10px;display:flex;gap:14px;align-items:flex-start;justify-content:space-between}
+.ncard h3{margin:0 0 3px;font-size:15px;font-weight:600}
+.ncard .meta{font-size:12px;color:var(--muted);margin-bottom:4px}
+.ncard p{margin:0;color:var(--muted);font-size:13px;max-width:900px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-top:16px}
+.panel h2{margin:0 0 4px;font-size:17px}.panel h3{margin:18px 0 8px;font-size:14px}
+.kv{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0}.kv span b{font-family:var(--mono);font-size:16px;margin-right:4px}
+.warn{background:rgba(240,164,60,.12);border:1px solid var(--sus);border-radius:6px;padding:7px 10px;font-size:13px;margin-top:8px}
+.matrix{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px}
+.mcol{min-width:178px;max-width:178px}
+.mcol h5{margin:0 0 6px;font-size:12px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line);padding-bottom:4px}
+.tcell{display:block;width:100%;text-align:left;margin-bottom:5px;border:1px solid var(--line);border-radius:5px;padding:5px 7px;background:var(--ink);cursor:pointer;font-size:12px;line-height:1.3}
+.tcell i{display:block;font-style:normal;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.tcell.high{background:rgba(242,97,111,.2);border-color:var(--mal)}
+.tcell.medium{background:rgba(240,164,60,.16);border-color:var(--sus)}
+.tcell.low{background:rgba(217,195,101,.10);border-color:rgba(217,195,101,.5)}
+.tcell.profile{border-style:dashed;color:var(--muted)}
+.tcell.open{outline:2px solid var(--link)}
+.tdetail{border:1px solid var(--link);border-radius:6px;padding:12px 14px;margin-top:8px;background:var(--ink)}
+.tdetail blockquote{margin:6px 0;padding:4px 10px;border-left:3px solid var(--line);color:var(--muted);font-size:12.5px}
+.ents{display:flex;gap:8px;flex-wrap:wrap}
+.ent{border:1px solid var(--line);border-radius:6px;padding:6px 10px;background:var(--ink);font-size:13px}
+.ent.on{border-color:var(--link)}
+.ent small{color:var(--muted);display:block}
+.cf{display:inline-block;border-radius:4px;padding:1px 7px;font-size:12px;border:1px solid var(--line)}
+.cf.high{color:var(--clean);border-color:var(--clean)}.cf.medium{color:var(--sus);border-color:var(--sus)}.cf.low{color:var(--muted)}
+.ctx{color:var(--muted);font-size:12px;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+html[data-theme="light"]{--ink:#f3f6fb;--panel:#ffffff;--panel2:#e9eef7;--line:#cfd8e6;--text:#17202e;--muted:#566680;--link:#1b63c2;--mal:#d12f3f;--sus:#b96a00;--low:#8a7600;--clean:#0f7d5e;--unk:#66788f;color-scheme:light}
+html[data-theme="light"] .btn.primary{color:#fff}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--unk);vertical-align:middle}
+.dot.ok{background:var(--clean)}.dot.warn{background:var(--sus)}.dot.bad{background:var(--mal)}.dot.idle,.dot.off{background:var(--unk)}
+.pill .dot{margin-right:5px}
+.ctxline{margin-top:4px;font-size:12px;color:var(--muted);display:flex;gap:2px 12px;flex-wrap:wrap}
+.ctxline .warnc{color:var(--sus);font-weight:600}.ctxline .stale{font-style:italic}
+.nbadge{border:1px solid var(--link);border-radius:4px;padding:0 6px;color:var(--link)}
+.cvechip{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-radius:4px;padding:0 6px}
+.ctxbox dl{grid-template-columns:auto 1fr}
+.sv{display:inline-flex;align-items:center}.sv .x{padding:2px 5px}
+.newb{font-style:normal;background:var(--link);color:#06101d;border-radius:8px;padding:0 6px;font-size:11px;margin-left:4px}
+html[data-theme="light"] .newb{color:#fff}
+.pick{padding-top:3px}
+.alist{margin:6px 0 0;padding-left:18px;font-size:13px}.alist li{margin:2px 0}
+.hist{margin-top:14px}.hist table{min-width:0}
+#healthTbl{min-width:0;font-size:12.5px}
+.printhead{display:none}
+@media print{
+  :root{--ink:#fff;--panel:#fff;--panel2:#f1f3f7;--line:#b9bfca;--text:#111;--muted:#444;--link:#0a3d91;--mal:#b00020;--sus:#9a5b00;--low:#6b5d00;--clean:#0a6b4f;--unk:#555}
+  body{background:#fff;color:#111;font-size:11px}
+  .noprint,header.top,.toast{display:none!important}
+  .printhead{display:block;margin:0 0 12px;font-size:12px;border-bottom:1px solid #999;padding-bottom:6px}
+  main{padding:0;max-width:none}
+  .tablewrap{overflow:visible;border:0}table{min-width:0;width:100%}th{position:static;background:#eee}
+  tr{break-inside:avoid}.panel,.card{border-color:#bbb}.matrix{flex-wrap:wrap;overflow:visible}
+  a{color:#0a3d91;text-decoration:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (max-width:700px){main{padding:14px 12px}header.top{padding:12px}}
+</style>
+</head>
+<body>
+<header class="top noprint">
+  <div class="brand"><h1>ThreatLens</h1></div>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab" role="tab" data-tab="ioc" aria-selected="true">Check indicators</button>
+    <button class="tab" role="tab" data-tab="news" aria-selected="false">News and ATT&amp;CK</button>
+  </nav>
+  <div class="pills" id="provPills" aria-label="Sources to query"></div>
+  <button class="btn small" id="btnTheme" aria-label="Switch colour theme">Light mode</button>
+</header>
+<div class="printhead" id="printHead"></div>
+
+<main>
+  <div id="tab-ioc">
+  <section class="card noprint">
+    <textarea id="input" spellcheck="false" aria-label="Indicators to check"
+      placeholder="Paste indicators, one per line or comma-separated. Defanged input (hxxp, [.]) is fine.&#10;&#10;185.220.101.4&#10;evil-login[.]example[.]com&#10;hxxps://payload[.]example/a.exe&#10;44d88612fea8a8f36de82e1278abb02f&#10;CVE-2024-3400"></textarea>
+    <div class="row">
+      <button class="btn primary" id="btnRun">Check indicators</button>
+      <button class="btn" id="btnStop" hidden>Stop</button>
+      <label class="btn">Load file<input type="file" id="file" accept=".txt,.csv,.tsv,.log,.json,.ioc" hidden></label>
+      <button class="btn" id="btnClear">Clear all</button>
+      <button class="btn" id="btnHist">History</button>
+      <label><input type="checkbox" id="refresh"> Bypass cache</label>
+      <span class="muted" id="parseInfo"></span>
+    </div>
+    <div class="progress" id="progress" hidden><div class="track"><i id="bar"></i></div><span id="progText" class="muted"></span></div>
+    <p class="note">Private IPs and internal domains are never sent to external services. Free VirusTotal keys allow 4 lookups a minute, so untick VT in the header for large batches.</p>
+    <details class="srcs" id="healthBox"><summary>Source health</summary><div class="tablewrap" style="margin-top:8px"><table id="healthTbl"></table></div>
+      <p class="note">Calls today are counted by this app. "Remaining" appears only for sources that report it.</p></details>
+  </section>
+  <section class="card hist noprint" id="histPanel" hidden></section>
+
+  <section id="results" hidden>
+    <div class="stats" id="stats"></div>
+
+    <div class="card filters noprint">
+      <div class="fg"><span class="lbl">Type</span><div class="seg" id="typeSeg"></div></div>
+      <div class="fg"><label for="minS">Score range</label>
+        <div class="range">
+          <input type="range" id="minS" min="0" max="100" value="0" aria-label="Minimum score"><output id="minO">0</output>
+          <span class="muted">to</span>
+          <input type="range" id="maxS" min="0" max="100" value="100" aria-label="Maximum score"><output id="maxO">100</output>
+        </div></div>
+      <div class="fg"><label for="minSrc">Flagged by at least</label>
+        <select id="minSrc"><option value="0">any</option><option value="1">1 source</option><option value="2">2 sources</option><option value="3">3 sources</option></select></div>
+      <div class="fg"><label for="q">Search</label><input type="search" id="q" placeholder="filter by text"></div>
+      <div class="fg"><label for="sort">Sort</label>
+        <select id="sort"><option value="scoreD">Score, high to low</option><option value="scoreA">Score, low to high</option>
+        <option value="flag">Sources flagging</option><option value="ioc">Indicator A-Z</option><option value="type">Type</option></select></div>
+      <div class="fg"><span class="lbl">Options</span>
+        <div><label><input type="checkbox" id="noData" checked> Show no-data</label>
+        &nbsp;<label><input type="checkbox" id="defang" checked> Defang output</label></div></div>
+      <div class="fg" style="margin-left:auto"><span class="lbl" id="shown"></span>
+        <div class="seg"><button id="btnCopy">Copy indicators</button><button id="btnPrint">Print report</button><button id="btnCsv">Export CSV</button><button id="btnJson">Export JSON</button></div></div>
+    </div>
+
+    <div class="tablewrap"><table>
+      <thead><tr><th style="width:34px"></th><th>Indicator</th><th>Type</th><th>Consolidated score</th><th>Verdict</th><th>Sources (click to open the source page)</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+  </div>
+
+  <div id="tab-news" hidden>
+    <section class="card noprint">
+      <div class="row" style="margin-top:0">
+        <input type="search" id="nq" aria-label="Search news" style="flex:1;min-width:260px" placeholder='Search news: "Lazarus", ransomware healthcare, CVE-2024-3400'>
+        <select id="ndays" aria-label="Time window"><option value="1">Last 24 hours</option><option value="3">Last 3 days</option><option value="7" selected>Last 7 days</option><option value="30">Last 30 days</option></select>
+        <label><input type="checkbox" id="nweb"> Include wider web news</label>
+        <label><input type="checkbox" id="nHide"> Hide analysed</label>
+        <button class="btn primary" id="nGo">Search news</button>
+        <button class="btn" id="nSave" title="Get a badge when new matching articles appear">Save search</button>
+      </div>
+      <div class="row"><span class="muted">Saved:</span><div id="saved" class="seg"></div></div>
+      <details class="srcs"><summary>Feeds <span id="srcCount" class="muted"></span></summary><div id="srcList" class="seg"></div></details>
+      <div class="row">
+        <input type="search" id="aUrl" aria-label="Report URL" style="flex:1;min-width:260px" placeholder="Or paste a report or article URL to analyse">
+        <button class="btn" id="aUrlGo">Analyse URL</button>
+        <button class="btn" id="aTextToggle">Paste text instead</button>
+        <button class="btn" id="nDigest" title="Analyse the newest unread articles, ranked by your saved searches and threat keywords">Daily digest</button>
+      </div>
+      <div id="aTextBox" hidden>
+        <textarea id="aText" style="margin-top:10px" spellcheck="false" aria-label="Report text" placeholder="Paste the report text here. Defanged indicators are fine."></textarea>
+        <div class="row"><button class="btn" id="aTextGo">Analyse text</button></div>
+      </div>
+      <p class="note" id="nMeta">Analysing a report extracts indicators and maps behaviours to MITRE ATT&amp;CK. Matches are based on wording in the text, so review them before acting.</p>
+    </section>
+    <div id="analysis" hidden></div>
+    <div class="row noprint" id="pickBar" hidden><span id="pickInfo" class="muted"></span><button class="btn small primary" id="pickGo">Analyse together</button><button class="btn small" id="pickClear">Clear selection</button></div>
+    <div id="newsList" class="noprint"></div>
+  </div>
+</main>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+"use strict";
+const CONCURRENCY = 3;
+const TYPES = ["ip","domain","url","hash","cve"];
+const TYPE_LABEL = {ip:"IP",domain:"Domain",url:"URL",hash:"Hash",cve:"CVE"};
+const VERDICTS = ["malicious","suspicious","low","clean","unknown"];
+const $ = id => document.getElementById(id);
+
+const S = {
+  providers: [], selected: new Set(), results: new Map(), expanded: new Set(),
+  running: false, stop: false, rafPending: false,
+  f: {types:new Set(TYPES), min:0, max:100, verdicts:new Set(), minSrc:0, q:"", noData:true, sort:"scoreD"}
+};
+
+/* ---------- helpers ---------- */
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function safeUrl(u){ return /^https?:\/\//i.test(u||"") ? u : "#"; }
+function band(s){ return s==null ? "unknown" : s>=70 ? "malicious" : s>=40 ? "suspicious" : s>=10 ? "low" : "clean"; }
+function verdictGroup(r){ return VERDICTS.includes(r.verdict) ? r.verdict : "unknown"; }
+function defangStr(v,type){
+  if(!$("defang").checked) return v;
+  if(type==="url") return v.replace(/^http/i,"hxxp").replace(/\./g,"[.]");
+  if(type==="ip"||type==="domain") return v.replace(/\./g,"[.]");
+  return v;
+}
+function toast(m){ const t=$("toast"); t.textContent=m; t.classList.add("show"); clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove("show"),1800); }
+async function api(path, body){
+  const r = await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+}
+async function copyText(t){
+  try{ await navigator.clipboard.writeText(t); }
+  catch{ const a=document.createElement("textarea"); a.value=t; document.body.appendChild(a); a.select(); document.execCommand("copy"); a.remove(); }
+  toast("Copied");
+}
+function download(name, text, mime){
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([text],{type:mime})); a.download=name; a.click(); URL.revokeObjectURL(a.href);
+}
+
+/* ---------- providers ---------- */
+async function loadProviders(){
+  S.providers = await (await fetch("/api/providers")).json();
+  S.providers.forEach(p => { if(p.configured) S.selected.add(p.id); });
+  renderPills();
+}
+function renderPills(){
+  $("provPills").innerHTML = S.providers.map(p=>{
+    const cls = !p.configured ? "missing" : S.selected.has(p.id) ? "on" : "off";
+    const hh = (S.health||{})[p.id];
+    let tip = p.configured ? `${p.desc} Types: ${p.types.join(", ")}` : `${p.desc} Add ${p.env} to .env to enable.`;
+    if(hh && hh.last_error) tip += ` Last error: ${hh.last_error}`;
+    const dot = p.configured ? `<i class="dot ${hh?hh.state:"idle"}"></i>` : "";
+    return `<button class="pill ${cls}" data-id="${esc(p.id)}" title="${esc(tip)}">${dot}${esc(p.name)}</button>`;
+  }).join("");
+}
+const STATE_LABEL={ok:"Working",warn:"Some recent errors",bad:"Last call failed",idle:"Not used yet",off:"No key"};
+async function refreshHealth(){
+  try{ S.health=Object.fromEntries((await (await fetch("/api/health")).json()).map(x=>[x.id,x])); renderPills(); if($("healthBox").open) renderHealth(); }catch{}
+}
+function renderHealth(){
+  const rows=Object.values(S.health||{});
+  $("healthTbl").innerHTML=`<thead><tr><th>Source</th><th>Status</th><th>Calls today</th><th>Remaining</th><th>Last error</th></tr></thead><tbody>`+
+    rows.map(x=>`<tr><td>${esc(x.name)}</td><td><i class="dot ${x.state}"></i>${esc(STATE_LABEL[x.state]||x.state)}</td>
+    <td>${x.calls_today}${x.daily_limit?" of "+x.daily_limit:""}</td><td>${x.remaining==null?"-":x.remaining}</td>
+    <td class="muted">${x.last_error?esc(x.last_error)+" ("+esc(ago(x.last_error_at))+")":"-"}</td></tr>`).join("")+`</tbody>`;
+}
+$("healthBox").addEventListener("toggle",()=>{ if($("healthBox").open) refreshHealth().then(renderHealth); });
+$("provPills").addEventListener("click", e=>{
+  const b=e.target.closest(".pill"); if(!b) return;
+  const p=S.providers.find(x=>x.id===b.dataset.id);
+  if(!p.configured){ toast(`Set ${p.env} in .env and restart to enable ${p.name}`); return; }
+  S.selected.has(p.id) ? S.selected.delete(p.id) : S.selected.add(p.id);
+  renderPills();
+});
+
+/* ---------- analysis ---------- */
+async function analyze(){
+  if(S.running) return;
+  const text=$("input").value;
+  if(!text.trim()){ toast("Paste at least one indicator"); return; }
+  if(!S.selected.size){ toast("Enable at least one source in the header"); return; }
+  const parsed = await api("/api/parse",{text});
+  let info = `${parsed.items.length} indicator(s) detected`;
+  if(parsed.skipped.length) info += `, ${parsed.skipped.length} unrecognised skipped`;
+  if(parsed.truncated) info += `, capped from ${parsed.total}`;
+  $("parseInfo").textContent = info;
+  if(!parsed.items.length) return;
+  await runQueue(parsed.items);
+}
+async function runQueue(items){
+  S.running=true; S.stop=false;
+  $("btnRun").disabled=true; $("btnStop").hidden=false; $("progress").hidden=false; $("results").hidden=false;
+  const refresh=$("refresh").checked, providers=[...S.selected], total=items.length;
+  let idx=0, done=0; setProgress(0,total);
+  async function worker(){
+    while(!S.stop){
+      const i=idx++; if(i>=total) break; const it=items[i];
+      try{ store(await api("/api/lookup",{ioc:it.ioc,providers,refresh})); }
+      catch(e){ store({ioc:it.ioc,type:it.type,score:null,verdict:"unknown",providers:{},pivots:[],flagged:0,sources:0,note:"Lookup failed: "+e.message}); }
+      done++; setProgress(done,total); schedule();
+    }
+  }
+  await Promise.all(Array.from({length:Math.min(CONCURRENCY,total)},worker));
+  S.running=false; $("btnRun").disabled=false; $("btnStop").hidden=true;
+  $("progText").textContent = S.stop ? `Stopped at ${done} of ${total}` : `Done: ${total} checked`;
+  persist(); render(); saveBatch(items); refreshSeen(); refreshHealth();
+}
+function setProgress(d,t){ $("bar").style.width=(t?d/t*100:0)+"%"; $("progText").textContent=`${d} of ${t} checked`; }
+function store(r){ S.results.set(r.ioc, r); }
+function schedule(){ if(S.rafPending) return; S.rafPending=true; setTimeout(()=>{S.rafPending=false; render();},150); }
+
+async function recheck(ioc){
+  try{ store(await api("/api/lookup",{ioc,providers:[...S.selected],refresh:true})); persist(); render(); toast("Re-checked"); }
+  catch(e){ toast("Re-check failed: "+e.message); }
+}
+
+/* ---------- persistence ---------- */
+function persist(){ try{ localStorage.setItem("threatlens.v1", JSON.stringify([...S.results.values()].slice(-300))); }catch{} }
+function restore(){
+  try{ const a=JSON.parse(localStorage.getItem("threatlens.v1")||"[]"); a.forEach(r=>S.results.set(r.ioc,r)); }catch{}
+}
+
+/* ---------- filtering / rendering ---------- */
+function passes(r, ignoreVerdict){
+  const f=S.f;
+  if(!f.types.has(r.type)) return false;
+  if(r.score==null){ if(!f.noData) return false; }
+  else if(r.score<f.min || r.score>f.max) return false;
+  if(!ignoreVerdict && f.verdicts.size && !f.verdicts.has(verdictGroup(r))) return false;
+  if(f.minSrc>0 && (r.flagged||0)<f.minSrc) return false;
+  if(f.q && !r.ioc.toLowerCase().includes(f.q)) return false;
+  return true;
+}
+function sorted(list){
+  const s=S.f.sort, sc=r=>r.score==null?-1:r.score;
+  const fn = {scoreD:(a,b)=>sc(b)-sc(a), scoreA:(a,b)=>sc(a)-sc(b), flag:(a,b)=>(b.flagged||0)-(a.flagged||0)||sc(b)-sc(a),
+              ioc:(a,b)=>a.ioc.localeCompare(b.ioc), type:(a,b)=>a.type.localeCompare(b.type)||sc(b)-sc(a)}[s];
+  return list.sort(fn);
+}
+function chipHtml(id, v){
+  if(v.status==="skipped") return "";
+  const cls = v.status==="error" ? "b-err" : v.status==="not_found" ? "b-none" : "b-"+band(v.score);
+  const label = v.status==="not_found" ? "no record" : v.badge || "-";
+  return `<a class="chip ${cls}" href="${esc(safeUrl(v.link))}" target="_blank" rel="noopener noreferrer" title="${esc(v.name+": "+v.summary)}"><b>${esc(v.short)}</b>${esc(label)}</a>`;
+}
+function dDays(ds){ return ds ? Math.floor((Date.now()-new Date(ds+"T00:00:00Z").getTime())/864e5) : null; }
+function dAgo(ds){ const d=dDays(ds); if(d==null) return ""; if(d<1) return "today"; if(d<60) return d+" d ago"; if(d<730) return Math.round(d/30)+" mo ago"; return (d/365).toFixed(1).replace(".0","")+" y ago"; }
+function ctxLine(r){
+  const c=r.ctx||{}, parts=[];
+  if(c.registered){ const d=dDays(c.registered), young=d!=null&&d<30;
+    parts.push(`<span class="${young?"warnc":""}" title="Domain registration date ${esc(c.registered)}">Registered ${esc(dAgo(c.registered))}${young?" (new domain)":""}</span>`); }
+  if(c.first_seen) parts.push(`<span title="Earliest sighting among the sources queried">First seen ${esc(c.first_seen)} (${esc(dAgo(c.first_seen))})</span>`);
+  if(c.last_seen){ const stale=dDays(c.last_seen)>180 && (r.score||0)>=40;
+    parts.push(`<span class="${stale?"stale":""}" title="Most recent activity reported by a source">Last seen ${esc(dAgo(c.last_seen))}${stale?", may be stale":""}</span>`); }
+  if(c.network) parts.push(`<span title="${esc(c.network.prefix||"")}">AS${esc(c.network.asn)} ${esc(String(c.network.holder||"").slice(0,30))}</span>`);
+  if(c.registrar) parts.push(`<span>Registrar: ${esc(String(c.registrar).slice(0,26))}</span>`);
+  const n=(S.news||{})[r.ioc];
+  if(n&&n.length) parts.push(`<a class="nbadge" href="${esc(safeUrl(n[0].link))}" target="_blank" rel="noopener noreferrer" title="${esc(n.map(x=>x.title).join("\n"))}">In news x${n.length}</a>`);
+  const cv=c.cves||[];
+  if(cv.length) parts.push(...cv.slice(0,3).map(x=>`<a class="cvechip" href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(x)}" target="_blank" rel="noopener noreferrer">${esc(x)}</a>`), ...(cv.length>3?[`<span>+${cv.length-3} CVEs</span>`]:[]));
+  return parts.length ? `<div class="ctxline">${parts.join("")}</div>` : "";
+}
+function rowHtml(r){
+  const v=verdictGroup(r), b=r.score==null?"unknown":band(r.score);
+  const open=S.expanded.has(r.ioc);
+  const chips = Object.entries(r.providers||{}).map(([id,p])=>chipHtml(id,p)).join("") || `<span class="muted">${esc(r.note||"No sources queried")}</span>`;
+  const score = r.score==null ? `<div class="score"><span class="num c-unknown">-</span></div>`
+    : `<div class="score"><span class="num c-${b}">${r.score}</span><div class="meter"><i class="m-${b}" style="width:${r.score}%"></i></div></div>`;
+  const label = r.verdict==="internal" ? "Internal" : r.score==null ? "No data" : b;
+  let html = `<tr class="main" data-ioc="${esc(r.ioc)}">
+    <td><button class="x noprint" data-act="toggle" aria-expanded="${open}" aria-label="Details">${open?"&#9662;":"&#9656;"}</button></td>
+    <td><div class="ioc">${esc(defangStr(r.ioc,r.type))}</div>${ctxLine(r)}</td>
+    <td><span class="type">${esc(TYPE_LABEL[r.type]||r.type)}</span></td>
+    <td>${score}${r.sources?`<div class="muted" style="font-size:11px">${r.sources} source${r.sources>1?"s":""} scored</div>`:""}</td>
+    <td><span class="verdict c-${r.score==null?"unknown":b}">${esc(label)}</span></td>
+    <td><div class="chips">${chips}</div></td></tr>`;
+  if(open) html += detailHtml(r);
+  return html;
+}
+function detailHtml(r){
+  const boxes = Object.entries(r.providers||{}).map(([id,p])=>{
+    const dl = Object.entries(p.details||{}).map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+    const sc = p.status==="ok" && p.score!=null ? `<span class="c-${band(p.score)}">${p.score}</span>` : `<span class="muted">${esc(p.status.replace("_"," "))}</span>`;
+    return `<div class="dbox"><h4><span>${esc(p.name)}</span>${sc}</h4><p>${esc(p.summary)}</p>${dl?`<dl>${dl}</dl>`:""}
+      <p style="margin:8px 0 0"><a href="${esc(safeUrl(p.link))}" target="_blank" rel="noopener noreferrer">Open on ${esc(p.name)}</a></p></div>`;
+  }).join("");
+  const c=r.ctx||{}, n=(S.news||{})[r.ioc]||[], rows=[];
+  if(c.registered) rows.push(["Domain registered", `${c.registered} (${dAgo(c.registered)})`]);
+  if(c.first_seen) rows.push(["First seen", `${c.first_seen} (${dAgo(c.first_seen)})`]);
+  if(c.last_seen) rows.push(["Last seen", `${c.last_seen} (${dAgo(c.last_seen)})`]);
+  if(c.network) rows.push(["Network", `AS${c.network.asn} ${c.network.holder||""} ${c.network.prefix?"("+c.network.prefix+")":""}`]);
+  if(c.registrar) rows.push(["Registrar", c.registrar]);
+  const cveBtn = (c.cves||[]).length ? `<button class="btn small" data-act="checkcves" style="margin-top:6px">Check these ${c.cves.length} CVEs</button>` : "";
+  const ctxBox = (rows.length||n.length||cveBtn) ? `<div class="dbox ctxbox"><h4><span>Context</span></h4>
+    ${rows.length?`<dl>${rows.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`:""}
+    ${(c.cves||[]).length?`<p style="margin-top:8px">Open ports suggest: ${(c.cves).map(x=>esc(x)).join(", ")}</p>${cveBtn}`:""}
+    ${n.length?`<p style="margin-top:8px">Mentioned in articles you analysed:</p>${n.map(x=>`<p style="margin:2px 0"><a href="${esc(safeUrl(x.link))}" target="_blank" rel="noopener noreferrer">${esc(x.title)}</a></p>`).join("")}`:""}</div>` : "";
+  const pv = (r.pivots||[]).map(p=>`<a class="chip" href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener noreferrer">${esc(p.name)}</a>`).join("");
+  return `<tr class="detail"><td></td><td colspan="5">
+    <div class="dgrid">${ctxBox}${boxes||`<span class="muted">${esc(r.note||"No source data")}</span>`}</div>
+    ${pv?`<div class="pivots"><span class="muted">More sources:</span>${pv}</div>`:""}
+    <div class="pivots noprint"><button class="btn small" data-act="copy">Copy indicator</button><button class="btn small" data-act="recheck">Re-check now</button>
+    <span class="muted">Checked ${esc(r.checked_at||"")}</span></div></td></tr>`;
+}
+function render(){
+  const all=[...S.results.values()];
+  $("results").hidden = !all.length && !S.running;
+  if(!all.length) return;
+  // stats (respect all filters except verdict so the cards act as a breakdown)
+  const base=all.filter(r=>passes(r,true)), cnt={};
+  VERDICTS.forEach(v=>cnt[v]=0); base.forEach(r=>cnt[verdictGroup(r)]++);
+  $("stats").innerHTML = `<button class="stat s-all ${S.f.verdicts.size?"":"active"}" data-v="all"><b>${base.length}</b>All results</button>` +
+    VERDICTS.map(v=>`<button class="stat s-${v} ${S.f.verdicts.has(v)?"active":""}" data-v="${v}"><b>${cnt[v]}</b>${v==="unknown"?"No data":v[0].toUpperCase()+v.slice(1)}</button>`).join("");
+  // type seg with counts
+  const tc={}; TYPES.forEach(t=>tc[t]=0); all.forEach(r=>{ if(tc[r.type]!==undefined) tc[r.type]++; });
+  $("typeSeg").innerHTML = TYPES.map(t=>`<button data-t="${t}" class="${S.f.types.has(t)?"on":""}">${TYPE_LABEL[t]}<em>${tc[t]}</em></button>`).join("");
+  const list=sorted(all.filter(r=>passes(r,false)));
+  $("shown").textContent=`${list.length} of ${all.length} shown`;
+  $("rows").innerHTML = list.length ? list.map(rowHtml).join("") : `<tr><td colspan="6" class="empty">Nothing matches these filters.</td></tr>`;
+}
+
+/* ---------- events ---------- */
+$("btnRun").onclick=()=>analyze().catch(e=>toast("Error: "+e.message));
+$("btnStop").onclick=()=>{S.stop=true;};
+$("btnClear").onclick=()=>{ if(S.running) return; S.results.clear(); S.expanded.clear(); S.news={}; persist(); $("rows").innerHTML=""; $("input").value=""; $("parseInfo").textContent=""; $("progress").hidden=true; render(); $("results").hidden=true; };
+$("input").addEventListener("keydown",e=>{ if(e.key==="Enter" && (e.ctrlKey||e.metaKey)) $("btnRun").click(); });
+$("file").onchange=async e=>{ const f=e.target.files[0]; if(!f) return; $("input").value=await f.text(); e.target.value=""; toast(`Loaded ${f.name}`); };
+$("minS").oninput=e=>{ let v=+e.target.value; if(v>S.f.max){v=S.f.max; e.target.value=v;} S.f.min=v; $("minO").textContent=v; render(); };
+$("maxS").oninput=e=>{ let v=+e.target.value; if(v<S.f.min){v=S.f.min; e.target.value=v;} S.f.max=v; $("maxO").textContent=v; render(); };
+$("minSrc").onchange=e=>{S.f.minSrc=+e.target.value; render();};
+$("q").oninput=e=>{S.f.q=e.target.value.trim().toLowerCase(); render();};
+$("sort").onchange=e=>{S.f.sort=e.target.value; render();};
+$("noData").onchange=e=>{S.f.noData=e.target.checked; render();};
+$("defang").onchange=render;
+$("typeSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return; const t=b.dataset.t;
+  S.f.types.has(t)?S.f.types.delete(t):S.f.types.add(t); render(); });
+$("stats").addEventListener("click",e=>{ const b=e.target.closest(".stat"); if(!b) return; const v=b.dataset.v;
+  if(v==="all") S.f.verdicts.clear(); else S.f.verdicts.has(v)?S.f.verdicts.delete(v):S.f.verdicts.add(v); render(); });
+$("rows").addEventListener("click",e=>{
+  const btn=e.target.closest("[data-act]"); if(!btn) return;
+  const tr=btn.closest("tr"); const ioc=(tr.classList.contains("detail")?tr.previousElementSibling:tr).dataset.ioc;
+  const act=btn.dataset.act;
+  if(act==="toggle"){ S.expanded.has(ioc)?S.expanded.delete(ioc):S.expanded.add(ioc); render(); }
+  if(act==="copy"){ const r=S.results.get(ioc); copyText(defangStr(r.ioc,r.type)); }
+  if(act==="recheck") recheck(ioc);
+  if(act==="checkcves"){ const r=S.results.get(ioc); $("input").value=((r.ctx||{}).cves||[]).join("\n"); $("btnRun").click(); }
+});
+function filtered(){ return sorted([...S.results.values()].filter(r=>passes(r,false))); }
+$("btnCopy").onclick=()=>{ const l=filtered(); if(!l.length) return toast("Nothing to copy"); copyText(l.map(r=>defangStr(r.ioc,r.type)).join("\n")); };
+function csvCell(v){ let s=String(v??""); if(/^[=+\-@\t\r]/.test(s)) s="'"+s; return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }
+$("btnCsv").onclick=()=>{
+  const l=filtered(); if(!l.length) return toast("Nothing to export");
+  const pids=S.providers.map(p=>p.id);
+  const head=["indicator","type","score","verdict","sources_scored","sources_flagging",...pids.map(id=>id+"_score"),"virustotal_link"];
+  const lines=[head.join(",")].concat(l.map(r=>[defangStr(r.ioc,r.type),r.type,r.score??"",r.verdict,r.sources,r.flagged,
+    ...pids.map(id=>{const p=(r.providers||{})[id]; return p&&p.status==="ok"&&p.score!=null?p.score:"";}),
+    (r.providers||{}).virustotal?.link||""].map(csvCell).join(",")));
+  download("threatlens-results.csv",lines.join("\n"),"text/csv"); };
+$("btnJson").onclick=()=>{ const l=filtered(); if(!l.length) return toast("Nothing to export");
+  download("threatlens-results.json",JSON.stringify(l,null,2),"application/json"); };
+
+/* ---------- theme, print, history, seen-in-news ---------- */
+function applyTheme(t){ document.documentElement.dataset.theme=t; $("btnTheme").textContent=t==="light"?"Dark mode":"Light mode"; try{ localStorage.setItem("threatlens.theme",t); }catch{} }
+$("btnTheme").onclick=()=>applyTheme(document.documentElement.dataset.theme==="light"?"dark":"light");
+$("btnPrint").onclick=()=>window.print();
+window.addEventListener("beforeprint",()=>{
+  const news=!$("tab-news").hidden, stamp=new Date().toLocaleString();
+  $("printHead").textContent = news && N.a ? `ThreatLens report: ${N.a.title} (${stamp})`
+    : `ThreatLens indicator report (${stamp}): ${$("shown").textContent}`;
+});
+S.news={}; S.health={};
+async function refreshSeen(){
+  const iocs=[...S.results.keys()]; if(!iocs.length) return;
+  try{ S.news=await api("/api/seen",{iocs}); render(); }catch{}
+}
+async function saveBatch(items){
+  const res=items.map(it=>S.results.get(it.ioc)).filter(Boolean); if(!res.length) return;
+  const label=items[0].ioc.slice(0,60)+(items.length>1?` and ${items.length-1} more`:"");
+  try{ await api("/api/history",{label,results:res}); if(!$("histPanel").hidden) loadHistory(); }catch{}
+}
+async function loadHistory(){
+  const p=$("histPanel");
+  let list=[]; try{ list=await (await fetch("/api/history")).json(); }catch{}
+  p.innerHTML=`<div class="row" style="margin:0"><b>Previous batches</b><span class="muted">Saved on this machine. Loading one shows its stored results without querying the sources again.</span><button class="btn small" data-h="close" style="margin-left:auto">Close</button></div>`+
+    (list.length?`<div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>When</th><th>Batch</th><th>Indicators</th><th>Malicious</th><th>Suspicious</th><th></th></tr></thead><tbody>`+
+    list.map(b=>`<tr><td>${esc(new Date(b.created).toLocaleString())}</td><td class="ioc">${esc(b.label||"")}</td><td>${b.total}</td><td class="c-malicious">${b.malicious}</td><td class="c-suspicious">${b.suspicious}</td>
+    <td><button class="btn small" data-h="load" data-id="${b.id}">Load</button> <button class="btn small" data-h="again" data-id="${b.id}">Check again</button> <button class="btn small" data-h="del" data-id="${b.id}">Delete</button></td></tr>`).join("")+`</tbody></table></div>`
+    : `<p class="muted" style="margin:10px 0 0">No batches yet. Each completed check is saved here.</p>`);
+}
+$("btnHist").onclick=()=>{ const p=$("histPanel"); p.hidden=!p.hidden; if(!p.hidden) loadHistory(); };
+$("histPanel").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-h]"); if(!b) return; const id=b.dataset.id;
+  if(b.dataset.h==="close") $("histPanel").hidden=true;
+  if(b.dataset.h==="del"){ await fetch("/api/history/"+id,{method:"DELETE"}); loadHistory(); }
+  if(b.dataset.h==="load"||b.dataset.h==="again"){
+    const r=await (await fetch("/api/history/"+id)).json(); if(!r.results) return toast("That batch is gone");
+    if(b.dataset.h==="again"){ $("input").value=r.results.map(x=>x.ioc).join("\n"); $("histPanel").hidden=true; $("btnRun").click(); return; }
+    S.results.clear(); S.expanded.clear(); r.results.forEach(store); $("results").hidden=false; $("histPanel").hidden=true; render(); refreshSeen(); toast(`Loaded ${r.results.length} results`);
+  }
+});
+
+(async function init(){
+  let t=null; try{ t=localStorage.getItem("threatlens.theme"); }catch{}
+  applyTheme(t || (window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light":"dark"));
+  restore();
+  try{ await loadProviders(); }catch(e){ toast("Cannot reach the ThreatLens server"); }
+  render(); refreshHealth(); refreshSeen();
+})();
+</script>
+
+<script>
+"use strict";
+/* ===== News, IOC extraction and ATT&CK map ===== */
+const N = {saved:[], picked:new Set(), hideDone:false, items:[], feeds:[], off:new Set(), a:null, sel:new Set(), conf:new Set(["high","medium"]), showLow:false,
+           profile:new Set(), open:null, loaded:false};
+
+function showTab(t){
+  document.querySelectorAll(".tab").forEach(b=>b.setAttribute("aria-selected", b.dataset.tab===t));
+  $("tab-ioc").hidden = t!=="ioc"; $("tab-news").hidden = t!=="news"; $("provPills").hidden = t!=="ioc";
+  if(t==="news" && !N.loaded){ N.loaded=true; loadFeedList().then(()=>searchNews()).then(loadSaved); }
+}
+document.querySelector(".tabs").addEventListener("click",e=>{ const b=e.target.closest(".tab"); if(b) showTab(b.dataset.tab); });
+
+function ago(iso){
+  if(!iso) return "date unknown";
+  const s=(Date.now()-new Date(iso).getTime())/1000;
+  if(s<3600) return Math.max(1,Math.round(s/60))+" min ago";
+  if(s<86400) return Math.round(s/3600)+" h ago";
+  return Math.round(s/86400)+" d ago";
+}
+async function getJson(url){ const r=await fetch(url); const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||("HTTP "+r.status)); return j; }
+async function postJson(url,body){ const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||("HTTP "+r.status)); return j; }
+
+/* ---- feeds + search ---- */
+async function loadFeedList(){
+  try{ N.feeds = await getJson("/api/feeds"); }catch{ N.feeds=[]; }
+  renderFeedList();
+}
+function renderFeedList(){
+  const usable=N.feeds.filter(f=>f.configured!==false);
+  $("srcCount").textContent = `(${usable.filter(f=>!N.off.has(f.id)).length} of ${usable.length} on)`;
+  $("srcList").innerHTML = N.feeds.map(f=>f.configured===false
+    ? `<button data-id="${esc(f.id)}" class="missing" data-missing="${esc(f.env||"")}" title="Add ${esc(f.env||"a key")} to .env and restart to enable">${esc(f.name)}</button>`
+    : `<button data-id="${esc(f.id)}" class="${N.off.has(f.id)?"":"on"}">${esc(f.name)}</button>`).join("");
+}
+$("srcList").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
+  if(b.dataset.missing!==undefined){ toast(`Set ${b.dataset.missing||"the API key"} in .env and restart to enable this feed`); return; }
+  N.off.has(b.dataset.id)?N.off.delete(b.dataset.id):N.off.add(b.dataset.id); renderFeedList(); });
+
+async function searchNews(refresh){
+  const btn=$("nGo"); btn.disabled=true; $("nMeta").textContent="Searching feeds...";
+  const on=N.feeds.filter(f=>f.configured!==false && !N.off.has(f.id)).map(f=>f.id);
+  const qs=new URLSearchParams({q:$("nq").value.trim(), days:$("ndays").value, sources:on.join(","), web:$("nweb").checked?"1":"0"});
+  if(refresh) qs.set("refresh","1");
+  try{
+    const r=await getJson("/api/news?"+qs);
+    N.items=r.items;
+    let m=`${r.total} article${r.total===1?"":"s"} from ${r.feeds} feed${r.feeds===1?"":"s"}`;
+    if(r.total>r.items.length) m+=`, showing the newest ${r.items.length}`;
+    if(r.errors.length) m+=`. Could not read: ${r.errors.map(e=>e.source).join(", ")}`;
+    $("nMeta").textContent=m;
+  }catch(e){ N.items=[]; $("nMeta").textContent="Search failed: "+e.message; }
+  btn.disabled=false; renderNews();
+}
+function renderNews(){
+  const list=N.items.filter(it=>!(N.hideDone && it.analyzed));
+  $("newsList").innerHTML = list.length ? list.map(it=>`<div class="ncard">
+    <label class="pick"><input type="checkbox" data-pick="${esc(it.id)}" ${N.picked.has(it.id)?"checked":""} aria-label="Select to analyse together"></label>
+    <div style="flex:1"><h3><a href="${esc(safeUrl(it.link))}" target="_blank" rel="noopener noreferrer">${esc(it.title)}</a></h3>
+    <div class="meta">${esc(it.source)} &middot; ${esc(ago(it.date))} ${it.analyzed?`<span class="cf high">analysed</span>`:""}</div><p>${esc(it.summary)}</p></div>
+    <button class="btn small" data-id="${esc(it.id)}">${it.analyzed?"View again":"Analyse"}</button></div>`).join("")
+    : N.items.length ? `<div class="empty">Everything here has been analysed. Untick "Hide analysed" to see it again.</div>`
+    : `<div class="empty">No articles match. Try a wider time window, fewer words, or tick "Include wider web news".</div>`;
+  updatePickBar();
+}
+function updatePickBar(){
+  const n=N.picked.size; $("pickBar").hidden=!n;
+  $("pickInfo").textContent = n===1 ? "1 article selected. Pick at least one more to compare them." : `${n} articles selected`;
+  $("pickGo").disabled = n<2;
+}
+$("newsList").addEventListener("change",e=>{ const id=e.target.dataset.pick; if(!id) return; e.target.checked?N.picked.add(id):N.picked.delete(id); updatePickBar(); });
+$("pickClear").onclick=()=>{ N.picked.clear(); renderNews(); };
+$("pickGo").onclick=()=>runMerged({ids:[...N.picked]}, "Merging the selected articles...");
+$("nHide").onchange=e=>{ N.hideDone=e.target.checked; renderNews(); };
+$("nDigest").onclick=()=>runMerged({days:1,limit:6}, "Picking the newest unread articles and analysing them. This can take up to a minute...");
+async function runMerged(body, msg){
+  const box=$("analysis"); box.hidden=false; box.innerHTML=`<div class="panel"><span class="muted">${esc(msg)}</span></div>`;
+  box.scrollIntoView({behavior:"smooth",block:"start"});
+  try{
+    const r=await postJson("/api/digest",body);
+    if(r.empty){ box.innerHTML=`<div class="panel"><b>Nothing new to analyse.</b><p class="muted">${esc(r.message)}</p>${r.errors&&r.errors.length?`<p class="muted">Could not read: ${esc(r.errors.map(e=>e.source).join(", "))}</p>`:""}</div>`; return; }
+    N.picked.clear(); setAnalysis(r);
+  }catch(e){ box.innerHTML=`<div class="panel"><b>Could not build that analysis.</b><p class="muted">${esc(e.message)}</p></div>`; }
+}
+function setAnalysis(r){
+  N.a=r; N.open=null; N.profile.clear(); N.showLow=false;
+  N.sel=new Set(r.iocs.filter(i=>N.conf.has(i.confidence) && (!r.digest || i.new)).map(i=>i.value));
+  if(r.digest && !N.sel.size) N.sel=new Set(r.iocs.filter(i=>N.conf.has(i.confidence)).map(i=>i.value));
+  const done=new Set(r.digest ? (r.articles||[]).filter(x=>!x.error).map(x=>x.id) : [r.aid]);
+  N.items.forEach(it=>{ if(done.has(it.id)) it.analyzed=true; });
+  renderNews(); renderAnalysis(); refreshSeen();
+}
+/* ---- saved searches ---- */
+async function loadSaved(){ try{ N.saved=await getJson("/api/searches"); }catch{ N.saved=[]; } renderSaved(); }
+function renderSaved(){
+  $("saved").innerHTML = N.saved.length ? N.saved.map(s=>`<span class="sv"><button data-sq="${esc(s.query)}" data-sid="${s.id}" title="${esc(s.days)} day window">${esc(s.query)}${s.new?`<em class="newb">${s.new} new</em>`:""}</button><button class="x" data-sdel="${s.id}" aria-label="Remove saved search ${esc(s.query)}">&times;</button></span>`).join("")
+    : `<span class="muted">Save a search to see a badge when new matching articles appear.</span>`;
+}
+$("saved").addEventListener("click",async e=>{
+  const del=e.target.closest("[data-sdel]"); if(del){ await fetch("/api/searches/"+del.dataset.sdel,{method:"DELETE"}); return loadSaved(); }
+  const b=e.target.closest("[data-sq]"); if(!b) return;
+  $("nq").value=b.dataset.sq; await searchNews(true); await fetch(`/api/searches/${b.dataset.sid}/seen`,{method:"POST"}); loadSaved();
+});
+$("nSave").onclick=async()=>{ const q=$("nq").value.trim(); if(!q) return toast("Type a search first");
+  try{ await postJson("/api/searches",{query:q,days:+$("ndays").value}); toast("Search saved"); loadSaved(); }catch(e){ toast(e.message); } };
+$("nGo").onclick=()=>searchNews(true);
+$("nq").addEventListener("keydown",e=>{ if(e.key==="Enter") searchNews(true); });
+$("newsList").addEventListener("click",e=>{ const b=e.target.closest("button[data-id]"); if(b) runAnalysis({id:b.dataset.id}); });
+$("aUrlGo").onclick=()=>{ const u=$("aUrl").value.trim(); if(!u) return toast("Enter a URL"); runAnalysis({url:u}); };
+$("aUrl").addEventListener("keydown",e=>{ if(e.key==="Enter") $("aUrlGo").click(); });
+$("aTextToggle").onclick=()=>{ $("aTextBox").hidden=!$("aTextBox").hidden; };
+$("aTextGo").onclick=()=>{ const t=$("aText").value; if(t.trim().length<40) return toast("Paste more text"); runAnalysis({text:t,title:"Pasted report"}); };
+
+/* ---- analysis ---- */
+async function runAnalysis(body){
+  const box=$("analysis"); box.hidden=false;
+  box.innerHTML=`<div class="panel"><span class="muted">Reading the report and mapping it to ATT&amp;CK...</span></div>`;
+  box.scrollIntoView({behavior:"smooth",block:"start"});
+  try{
+    setAnalysis(await postJson("/api/analyze", body));
+  }catch(e){ box.innerHTML=`<div class="panel"><b>Could not analyse that report.</b><p class="muted">${esc(e.message)}</p></div>`; }
+}
+function techList(){
+  const a=N.a.attack; if(!a) return [];
+  const list=a.techniques.filter(t=>t.band!=="low"||N.showLow).map(t=>({...t,kind:t.band}));
+  const have=new Set(a.techniques.map(t=>t.id));
+  N.profile.forEach(eid=>{ const e=a.entities.find(x=>x.id===eid); if(!e) return;
+    e.techniques.forEach(id=>{ const c=a.profile_catalog[id]; if(!c||have.has(id)) return; have.add(id);
+      list.push({id,name:c.name,tactics:c.tactics,score:30,kind:"profile",url:c.url,desc:"",
+        evidence:[{kind:"profile",match:e.name,snippet:`Known to be used by ${e.name} in ATT&CK. Not observed in this report's text.`}]}); }); });
+  return list;
+}
+function renderAnalysis(){
+  const a=N.a, at=a.attack, box=$("analysis");
+  const c=a.counts;
+  let h=`<div class="panel"><h2>${a.link?`<a href="${esc(safeUrl(a.link))}" target="_blank" rel="noopener noreferrer">${esc(a.title)}</a>`:esc(a.title)}</h2>
+    <div class="muted">${esc(a.source)}${a.date?" &middot; "+esc(ago(a.date)):""} &middot; ${a.chars.toLocaleString()} characters read</div>
+    ${a.note?`<div class="warn">${esc(a.note)}</div>`:""}
+    <div class="kv"><span><b>${c.ip}</b>IPs</span><span><b>${c.domain}</b>domains</span><span><b>${c.url}</b>URLs</span><span><b>${c.hash}</b>hashes</span><span><b>${c.cve}</b>CVEs</span>
+    <span><b>${at?at.techniques.length:"-"}</b>ATT&amp;CK techniques</span></div>`;
+  if(a.articles) h+=`<h3>Articles included</h3><ul class="alist">`+a.articles.map(x=>x.error
+      ? `<li><span class="muted">${esc(x.title)} (could not read: ${esc(x.error)})</span></li>`
+      : `<li><a href="${esc(safeUrl(x.link))}" target="_blank" rel="noopener noreferrer">${esc(x.title)}</a> <span class="muted">${esc(x.source)}</span></li>`).join("")+`</ul>
+      <p class="note">Technique cells show how many of these articles support them (for example x3). Indicators tagged new were not in any article analysed before this one.</p>`;
+  if(a.otx){
+    const o=a.otx, bits=[];
+    if(o.author) bits.push("Author: "+esc(o.author));
+    if(o.adversary) bits.push("Adversary: <b>"+esc(o.adversary)+"</b>");
+    if(o.malware.length) bits.push("Malware: "+esc(o.malware.join(", ")));
+    if(o.industries.length) bits.push("Industries: "+esc(o.industries.join(", ")));
+    if(o.countries.length) bits.push("Targets: "+esc(o.countries.join(", ")));
+    h+=`<div class="muted" style="margin-top:6px">${bits.join(" &middot; ")}</div>`;
+    if(o.tags.length) h+=`<div class="chips" style="margin-top:6px">${o.tags.map(t=>`<span class="type">${esc(t)}</span>`).join("")}</div>`;
+    if(["red","amber"].includes(o.tlp)) h+=`<div class="warn">This pulse is marked TLP:${esc(o.tlp.toUpperCase())}. Check the sharing rules before sending its indicators to outside services such as VirusTotal.</div>`;
+    if(o.unmapped_attack.length) h+=`<div class="note">ATT&amp;CK tags on this pulse that are not in the current matrix (retired or renumbered IDs): ${o.unmapped_attack.map(u=>esc(u.id+(u.name?" "+u.name:""))).join(", ")}</div>`;
+    if(o.references.length) h+=`<div class="note">References: ${o.references.map(r=>`<a href="${esc(safeUrl(r))}" target="_blank" rel="noopener noreferrer">${esc(r.replace(/^https?:\/\//,"").slice(0,48))}</a>`).join(" &middot; ")}</div>`;
+  }
+  if(!at) h+=`<div class="warn">ATT&amp;CK data is not loaded. Run <code>python -c "import intel; intel.refresh_attack()"</code> or call POST /api/attack/refresh, then analyse again.</div>`;
+  if(at && at.entities.length){
+    h+=`<h3>Actors and malware named in the text</h3><div class="ents">`+at.entities.map(e=>`<div class="ent ${N.profile.has(e.id)?"on":""}">
+      <a href="${esc(safeUrl(e.url))}" target="_blank" rel="noopener noreferrer"><b>${esc(e.name)}</b></a> <span class="muted">${esc(e.type)}</span>
+      <small>${e.technique_count} techniques in ATT&amp;CK${e.aliases.length?" &middot; also "+esc(e.aliases.slice(0,3).join(", ")):""}</small>
+      <button class="btn small" data-ent="${esc(e.id)}" style="margin-top:6px">${N.profile.has(e.id)?"Hide its techniques":"Show its techniques on the map"}</button></div>`).join("")+`</div>
+      <p class="note">Dashed cells on the map are techniques this actor is known for. They were not seen in the report, so treat them as hunting ideas, not findings.</p>`;
+  }
+  if(at){
+    const tl=techList(), low=at.techniques.filter(t=>t.band==="low").length;
+    h+=`<h3>ATT&amp;CK map <span class="muted" style="font-weight:400">(${tl.length} shown)</span></h3>
+      <div class="row noprint" style="margin:0 0 10px">${low?`<button class="btn small" id="btnLow">${N.showLow?"Hide":"Show"} ${low} low-confidence</button>`:""}
+      <button class="btn small" id="btnLayer">Download ATT&amp;CK Navigator layer</button><button class="btn small" id="btnPrintA">Print report</button></div>`;
+    if(!tl.length) h+=`<div class="muted">No techniques were identified from the wording of this report.</div>`;
+    else{
+      const cols=at.tactics.map(t=>({t,items:tl.filter(x=>x.tactics.includes(t.id)).sort((p,q)=>q.score-p.score)})).filter(c=>c.items.length);
+      h+=`<div class="matrix">`+cols.map(c=>`<div class="mcol"><h5>${esc(c.t.name)} (${c.items.length})</h5>`+c.items.map(x=>
+        `<button class="tcell ${x.kind} ${N.open===x.id?"open":""}" data-tech="${esc(x.id)}"><i>${esc(x.id)}${x.n>1?" x"+x.n:""}</i>${esc(x.name.includes(": ")?x.name.split(": ")[1]:x.name)}</button>`).join("")+`</div>`).join("")+`</div>`;
+      const o=tl.find(x=>x.id===N.open);
+      if(o) h+=`<div class="tdetail"><b>${esc(o.id)} ${esc(o.name)}</b> &middot; <span class="cf ${o.kind==="profile"?"low":o.band}">${o.kind==="profile"?"profile":o.band+" confidence"}</span>
+        &middot; <a href="${esc(safeUrl(o.url))}" target="_blank" rel="noopener noreferrer">View on MITRE</a>
+        ${o.desc?`<p class="muted" style="margin:8px 0">${esc(o.desc)}</p>`:""}
+        ${o.evidence.map(ev=>`<blockquote><b>${esc(ev.kind)}:</b> ${esc(ev.match)}${ev.article?` <span class="muted">(${esc(ev.article)})</span>`:""}<br>${esc(ev.snippet)}</blockquote>`).join("")}</div>`;
+    }
+  }
+  h+=`<h3>Indicators</h3>${iocTable()}</div>`;
+  box.innerHTML=h;
+}
+function visibleIocs(){ return N.a.iocs.filter(i=>N.conf.has(i.confidence)); }
+function iocTable(){
+  const a=N.a;
+  if(!a.iocs.length) return `<div class="muted">No indicators found in the text.</div>`;
+  const vis=visibleIocs();
+  const chk=["high","medium","low"].map(c=>`<label><input type="checkbox" data-conf="${c}" ${N.conf.has(c)?"checked":""}> ${c} (${a.iocs.filter(i=>i.confidence===c).length})</label>`).join(" &nbsp; ");
+  const nsel=[...N.sel].filter(v=>vis.some(i=>i.value===v)).length;
+  return `<div class="row noprint" style="margin:0 0 10px"><span class="muted">Show confidence:</span> ${chk}
+    <span style="margin-left:auto"></span>
+    <button class="btn small" id="btnSelAll">Select all shown</button><button class="btn small" id="btnSelNone">Clear</button>
+    <button class="btn small" id="btnCopySel">Copy selected</button>
+    <button class="btn primary small" id="btnSend" ${nsel?"":"disabled"}>Check ${nsel} selected in the indicator tab</button></div>
+    <p class="note" style="margin:0 0 8px">High: defanged in the text, or a hash or CVE. Medium: sits near words like C2, payload or indicator. Low: just appears in the text, often a reference link.</p>
+    <div class="tablewrap"><table style="min-width:720px"><thead><tr><th style="width:34px"></th><th>Indicator</th><th>Type</th><th>Confidence</th><th>Mentions</th><th>Where it appears</th></tr></thead><tbody>`+
+    vis.map(i=>`<tr><td><input type="checkbox" data-ioc="${esc(i.value)}" ${N.sel.has(i.value)?"checked":""} aria-label="Select ${esc(i.value)}"></td>
+      <td><div class="ioc">${esc(defangStr(i.value,i.type))}${i.new?` <span class="cf high">new</span>`:""}</div></td><td><span class="type">${esc(TYPE_LABEL[i.type]||i.type)}</span></td>
+      <td><span class="cf ${i.confidence}">${i.confidence}</span></td><td>${i.count}${i.n>1?` in ${i.n} articles`:""}</td><td><div class="ctx" title="${esc(defangStr(i.context,"x"))}">${esc(i.context)}</div></td></tr>`).join("")+`</tbody></table></div>`;
+}
+function selectedValues(){ const vis=new Set(visibleIocs().map(i=>i.value)); return [...N.sel].filter(v=>vis.has(v)); }
+
+$("analysis").addEventListener("click",e=>{
+  const t=e.target.closest("[data-tech]"); if(t){ N.open=N.open===t.dataset.tech?null:t.dataset.tech; renderAnalysis(); return; }
+  const en=e.target.closest("[data-ent]"); if(en){ const id=en.dataset.ent; N.profile.has(id)?N.profile.delete(id):N.profile.add(id); renderAnalysis(); return; }
+  const id=e.target.id;
+  if(id==="btnLow"){ N.showLow=!N.showLow; renderAnalysis(); }
+  if(id==="btnSelAll"){ visibleIocs().forEach(i=>N.sel.add(i.value)); renderAnalysis(); }
+  if(id==="btnSelNone"){ N.sel.clear(); renderAnalysis(); }
+  if(id==="btnCopySel"){ const v=selectedValues(); if(!v.length) return toast("Nothing selected");
+    const types=new Map(N.a.iocs.map(i=>[i.value,i.type])); copyText(v.map(x=>defangStr(x,types.get(x))).join("\n")); }
+  if(id==="btnSend"){ const v=selectedValues(); if(!v.length) return;
+    $("input").value=v.join("\n"); showTab("ioc"); $("btnRun").click(); }
+  if(id==="btnLayer") exportLayer();
+  if(id==="btnPrintA") window.print();
+});
+$("analysis").addEventListener("change",e=>{
+  const c=e.target.dataset;
+  if(c.conf){ e.target.checked?N.conf.add(c.conf):N.conf.delete(c.conf); renderAnalysis(); }
+  if(c.ioc){ e.target.checked?N.sel.add(c.ioc):N.sel.delete(c.ioc); const b=$("btnSend"); const n=selectedValues().length;
+    b.disabled=!n; b.textContent=`Check ${n} selected in the indicator tab`; }
+});
+async function exportLayer(){
+  const list=techList(); if(!list.length) return toast("No techniques to export");
+  try{
+    const layer=await postJson("/api/attack/layer",{name:"ThreatLens: "+N.a.title.slice(0,80),
+      techniques:list.map(t=>({id:t.id,score:t.n>1?Math.min(100,Math.round(t.score*0.7+10*(t.n-1))):t.score,comment:(t.kind==="profile"?"Actor profile, not observed in text. ":"")+(t.n>1?`Supported by ${t.n} articles. `:"")+(t.evidence[0]?t.evidence[0].kind+": "+t.evidence[0].match:"")}))});
+    download("threatlens-attack-layer.json",JSON.stringify(layer,null,2),"application/json");
+  }catch(e){ toast("Layer export failed: "+e.message); }
+}
+</script>
+</body>
+</html>

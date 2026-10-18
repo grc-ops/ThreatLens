@@ -1,0 +1,87 @@
+[
+  {
+    "id": "bleeping",
+    "name": "BleepingComputer",
+    "url": "https://www.bleepingcomputer.com/feed/"
+  },
+  {
+    "id": "thn",
+    "name": "The Hacker News",
+    "url": "https://feeds.feedburner.com/TheHackersNews"
+  },
+  {
+    "id": "krebs",
+    "name": "Krebs on Security",
+    "url": "https://krebsonsecurity.com/feed/"
+  },
+  {
+    "id": "cisa",
+    "name": "CISA Advisories",
+    "url": "https://www.cisa.gov/cybersecurity-advisories/all.xml"
+  },
+  {
+    "id": "unit42",
+    "name": "Unit 42",
+    "url": "https://unit42.paloaltonetworks.com/feed/"
+  },
+  {
+    "id": "talos",
+    "name": "Cisco Talos",
+    "url": "https://blog.talosintelligence.com/rss/"
+  },
+  {
+    "id": "msft",
+    "name": "Microsoft Security",
+    "url": "https://www.microsoft.com/en-us/security/blog/feed/"
+  },
+  {
+    "id": "gti",
+    "name": "Google Threat Intel",
+    "url": "https://cloudblog.withgoogle.com/topics/threat-intelligence/rss/"
+  },
+  {
+    "id": "dfir",
+    "name": "The DFIR Report",
+    "url": "https://thedfirreport.com/feed/"
+  },
+  {
+    "id": "sans",
+    "name": "SANS ISC",
+    "url": "https://isc.sans.edu/rssfeed.xml"
+  },
+  {
+    "id": "securelist",
+    "name": "Securelist",
+    "url": "https://securelist.com/feed/"
+  },
+  {
+    "id": "eset",
+    "name": "WeLiveSecurity",
+    "url": "https://www.welivesecurity.com/en/rss/feed/"
+  },
+  {
+    "id": "elastic",
+    "name": "Elastic Security Labs",
+    "url": "https://www.elastic.co/security-labs/rss/feed.xml"
+  },
+  {
+    "id": "sophos",
+    "name": "Sophos X-Ops",
+    "url": "https://news.sophos.com/en-us/category/threat-research/feed/"
+  },
+  {
+    "id": "securityweek",
+    "name": "SecurityWeek",
+    "url": "https://feeds.feedburner.com/securityweek"
+  },
+  {
+    "id": "record",
+    "name": "The Record",
+    "url": "https://therecord.media/feed"
+  },
+  {
+    "id": "darkreading",
+    "name": "Dark Reading",
+    "url": "https://www.darkreading.com/rss.xml"
+  }
+]

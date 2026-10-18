@@ -1,0 +1,4 @@
+.env
+data/threatlens.db*
+__pycache__/
+.venv/
