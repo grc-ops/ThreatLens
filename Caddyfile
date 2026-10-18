@@ -1,0 +1,5 @@
+# Set DOMAIN in .env (for example threatlens.yourcompany.com). Caddy gets and renews the HTTPS certificate itself.
+{$DOMAIN:localhost} {
+	encode gzip
+	reverse_proxy app:8000
+}

@@ -191,7 +191,7 @@ html[data-theme="light"] .newb{color:#fff}
     <div class="progress" id="progress" hidden><div class="track"><i id="bar"></i></div><span id="progText" class="muted"></span></div>
     <p class="note">Private IPs and internal domains are never sent to external services. Free VirusTotal keys allow 4 lookups a minute, so untick VT in the header for large batches.</p>
     <details class="srcs" id="healthBox"><summary>Source health</summary><div class="tablewrap" style="margin-top:8px"><table id="healthTbl"></table></div>
-      <p class="note">Calls today are counted by this app. "Remaining" appears only for sources that report it.</p></details>
+      <p class="note"><span id="usageNote"></span> Calls today are counted by this app. "Remaining" appears only for sources that report it.</p></details>
   </section>
   <section class="card hist noprint" id="histPanel" hidden></section>
 
@@ -285,7 +285,7 @@ function defangStr(v,type){
 function toast(m){ const t=$("toast"); t.textContent=m; t.classList.add("show"); clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove("show"),1800); }
 async function api(path, body){
   const r = await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  if(!r.ok) throw new Error("HTTP "+r.status);
+  if(!r.ok){ let m="HTTP "+r.status; try{ m=(await r.json()).error||m; }catch{} throw new Error(m); }
   return r.json();
 }
 async function copyText(t){
@@ -315,6 +315,7 @@ function renderPills(){
 }
 const STATE_LABEL={ok:"Working",warn:"Some recent errors",bad:"Last call failed",idle:"Not used yet",off:"No key"};
 async function refreshHealth(){
+  try{ const u=await (await fetch("/api/usage")).json(); $("usageNote").textContent=u.limit?`Lookups today: ${u.used} of ${u.limit}.`:`Lookups today: ${u.used}.`; }catch{}
   try{ S.health=Object.fromEntries((await (await fetch("/api/health")).json()).map(x=>[x.id,x])); renderPills(); if($("healthBox").open) renderHealth(); }catch{}
 }
 function renderHealth(){

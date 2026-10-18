@@ -9,7 +9,8 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 
-DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "threatlens.db")
+_BASE = os.path.dirname(os.path.abspath(__file__))
+DB = os.path.join(os.getenv("STATE_DIR") or os.path.join(_BASE, "data"), "threatlens.db")
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "90"))
 MAX_BATCHES = 50
 MAX_SEARCHES = 20

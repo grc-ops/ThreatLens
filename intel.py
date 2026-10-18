@@ -39,8 +39,10 @@ except ImportError:  # pragma: no cover
 bp = Blueprint("intel", __name__)
 BASE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE, "data")
-ATTACK_PATH = os.path.join(DATA_DIR, "attack_index.json")
-FEEDS_PATH = os.path.join(DATA_DIR, "feeds.json")
+STATE_DIR = os.getenv("STATE_DIR") or DATA_DIR  # writable: database, refreshed ATT&CK data, feed overrides
+ATTACK_PATH = os.path.join(STATE_DIR, "attack_index.json")
+ATTACK_BAKED = os.path.join(DATA_DIR, "attack_index.json")
+FEEDS_PATHS = [os.path.join(STATE_DIR, "feeds.json"), os.path.join(DATA_DIR, "feeds.json")]
 STIX_URL = ("https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/"
             "enterprise-attack/enterprise-attack.json")
 UA = "ThreatLens/1.1 (+SOC news intel)"
@@ -73,9 +75,10 @@ FEEDS_DEFAULT = [
 
 
 def load_feeds():
-    if os.path.exists(FEEDS_PATH):
+    path = next((p for p in FEEDS_PATHS if os.path.exists(p)), None)
+    if path:
         try:
-            with open(FEEDS_PATH, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, list) and data:
                 return data
@@ -696,11 +699,12 @@ def load_attack(force=False):
     with ATTACK_LOCK:
         if ATTACK.get("loaded") and not force:
             return ATTACK
-        if not os.path.exists(ATTACK_PATH):
+        path = ATTACK_PATH if os.path.exists(ATTACK_PATH) else ATTACK_BAKED
+        if not os.path.exists(path):
             ATTACK.clear()
             ATTACK.update({"loaded": False})
             return ATTACK
-        with open(ATTACK_PATH, encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             idx = json.load(f)
         ATTACK.clear()
         ATTACK.update(idx)
@@ -733,7 +737,7 @@ def refresh_attack():
     r = requests.get(STIX_URL, timeout=180, headers={"User-Agent": UA})
     r.raise_for_status()
     idx = build_attack_index(r.json())
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(STATE_DIR, exist_ok=True)
     with open(ATTACK_PATH, "w", encoding="utf-8") as f:
         json.dump(idx, f)
     store.purge_results()

@@ -7,6 +7,7 @@ Queries many threat-intel sources in parallel, normalises each verdict to a
 .env on the server; the browser never sees them.
 """
 import base64
+import logging
 import hashlib
 import ipaddress
 import os
@@ -16,7 +17,7 @@ import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import requests
 from flask import Flask, jsonify, request, send_from_directory
@@ -41,6 +42,16 @@ import store  # noqa: E402  (history, sightings, saved searches)
 from intel import bp as intel_bp  # noqa: E402  (news search, IOC extraction, ATT&CK mapping)
 
 app.register_blueprint(intel_bp)
+
+log = logging.getLogger("threatlens")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+
+# Behind a reverse proxy (Caddy, Render, Cloudflare) set TRUST_PROXY to the number of proxies in front.
+_proxies = int(os.getenv("TRUST_PROXY", "0") or 0)
+if _proxies:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=_proxies, x_proto=_proxies, x_host=_proxies)
 
 
 def key(name):
@@ -770,6 +781,57 @@ def consolidate(provs):
     return int(round(max(avg, top * 0.8))), len(scored)
 
 
+def _nets(var):
+    out = []
+    for part in os.getenv(var, "").split(","):
+        part = part.strip()
+        if part:
+            try:
+                out.append(ipaddress.ip_network(part, strict=False))
+            except ValueError:
+                print(f"warning: ignoring invalid entry in {var}: {part}")
+    return out
+
+
+ALLOWED_NETS = _nets("ALLOWED_NETS")        # if set, only these client networks may use the app
+if os.getenv("REQUIRE_ALLOWED_NETS") == "1" and not ALLOWED_NETS:
+    raise SystemExit("REQUIRE_ALLOWED_NETS is on but ALLOWED_NETS is empty or invalid. "
+                     "Refusing to start without a network restriction.")
+NEVER_NETS = _nets("NEVER_SEND_CIDRS")      # your own public IP ranges: never sent to outside services
+NEVER_DOMAINS = [d.strip().lower().lstrip(".") for d in os.getenv("NEVER_SEND_DOMAINS", "").split(",") if d.strip()]
+BUDGET = int(os.getenv("DAILY_BUDGET", "0") or 0)
+USAGE = {"day": date.today().isoformat(), "n": 0}
+USAGE_LOCK = threading.Lock()
+
+
+class BudgetExceeded(Exception):
+    pass
+
+
+def take_budget():
+    with USAGE_LOCK:
+        today = date.today().isoformat()
+        if USAGE["day"] != today:
+            USAGE["day"], USAGE["n"] = today, 0
+        if BUDGET and USAGE["n"] >= BUDGET:
+            return False
+        USAGE["n"] += 1
+        return True
+
+
+def never_send(ioc, t):
+    host = (urlparse(ioc).hostname or "") if t == "url" else ioc
+    if t in ("domain", "url") and host and any(host.lower() == d or host.lower().endswith("." + d) for d in NEVER_DOMAINS):
+        return True
+    try:
+        if t == "ip" or (t == "url" and host):
+            ip = ipaddress.ip_address(host.strip("[]"))
+            return any(ip in n for n in NEVER_NETS)
+    except ValueError:
+        pass
+    return False
+
+
 def aggregate_context(out):
     """Age, activity, network and related-CVE context gathered from whichever sources answered."""
     ok = [v for v in out.values() if v["status"] in ("ok", "not_found")]
@@ -800,7 +862,12 @@ def lookup(raw, selected=None, refresh=False):
     if is_internal(ioc, t):
         return {**base, "score": None, "verdict": "internal", "pivots": [],
                 "note": "Private or reserved address: not sent to external services"}
+    if never_send(ioc, t):
+        return {**base, "score": None, "verdict": "internal", "pivots": [],
+                "note": "Matches your NEVER_SEND list: not sent to external services"}
     elig = [p for p in PROVIDERS.values() if t in p["types"] and (not selected or p["id"] in selected)]
+    if elig and not take_budget():
+        raise BudgetExceeded()
     out = {}
     if elig:
         with ThreadPoolExecutor(max_workers=len(elig)) as ex:
@@ -816,6 +883,57 @@ def lookup(raw, selected=None, refresh=False):
 # --------------------------------------------------------------------------
 # Routes
 # --------------------------------------------------------------------------
+def _client_ip():
+    try:
+        ip = ipaddress.ip_address(request.remote_addr or "")
+    except ValueError:
+        return None
+    return ip.ipv4_mapped if ip.version == 6 and ip.ipv4_mapped else ip
+
+
+@app.before_request
+def gate():
+    if request.path == "/healthz" or not ALLOWED_NETS:
+        return None
+    ip = _client_ip()
+    if ip is None or not any(ip in n for n in ALLOWED_NETS):
+        log.warning("blocked ip=%s %s %s", request.remote_addr, request.method, request.path)
+        return "Forbidden: your network is not allowed to use this tool.", 403
+    return None
+
+
+AUDITED = ("/api/lookup", "/api/analyze", "/api/digest", "/api/news", "/api/history", "/api/searches", "/api/attack/refresh")
+
+
+@app.after_request
+def harden(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Content-Security-Policy",
+                            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+                            "img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+    if request.is_secure:
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    if request.path.startswith(AUDITED) and request.method != "OPTIONS":
+        what = ""
+        if request.path == "/api/lookup":
+            what = " ioc=" + re.sub(r"[\r\n\t]", " ", str((request.get_json(silent=True) or {}).get("ioc", "")))[:120]
+        log.info("audit ip=%s %s %s %s%s", request.remote_addr, request.method, request.path, resp.status_code, what)
+    return resp
+
+
+@app.get("/healthz")
+def healthz():
+    return jsonify({"ok": True})
+
+
+@app.get("/api/usage")
+def api_usage():
+    with USAGE_LOCK:
+        return jsonify({"used": USAGE["n"] if USAGE["day"] == date.today().isoformat() else 0, "limit": BUDGET or None})
+
+
 @app.get("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
@@ -902,7 +1020,10 @@ def api_lookup():
     raw = str(body.get("ioc", ""))[:2048]
     if not raw.strip():
         return jsonify({"error": "ioc is required"}), 400
-    return jsonify(lookup(raw, set(body.get("providers") or []), bool(body.get("refresh"))))
+    try:
+        return jsonify(lookup(raw, set(body.get("providers") or []), bool(body.get("refresh"))))
+    except BudgetExceeded:
+        return jsonify({"error": f"Daily lookup budget of {BUDGET} reached. It resets at midnight UTC, or raise DAILY_BUDGET."}), 429
 
 
 if __name__ == "__main__":

@@ -44,6 +44,26 @@ python app.py               # http://127.0.0.1:5000
 - **Analyse together:** tick two or more articles to merge their indicators and techniques. Technique cells show how many articles support them, and the exported Navigator layer scores them higher when several articles agree.
 - Everything above is stored in `data/threatlens.db` (SQLite). It is safe to delete.
 
+## Deployment
+Local use is unchanged (`python app.py`). For a server, the project ships with a Dockerfile (gunicorn, one worker and many threads, non-root), `docker-compose.yml` plus a `Caddyfile` (VPS with automatic HTTPS) and `render.yaml` (Render).
+
+Settings for a shared deployment (all optional, set them as environment variables or in `.env`):
+
+| Setting | What it does |
+|---|---|
+| `ALLOWED_NETS` | Only these client IPs or networks can use the app; everyone else gets 403. Use your office or VPN public IPs. `/healthz` is always open for platform health checks. |
+| `REQUIRE_ALLOWED_NETS` | Set to 1 on servers. The app refuses to start if `ALLOWED_NETS` is empty, so a typo cannot leave it open to the internet. |
+| `TRUST_PROXY` | Number of reverse proxies in front (1 for Caddy or Render, 2 if Cloudflare is also in front). Needed so `ALLOWED_NETS` and the audit log see the real client IP. Leave 0 when nothing is in front. |
+| `NEVER_SEND_DOMAINS`, `NEVER_SEND_CIDRS` | Your own domains and public IP ranges. Matching indicators are never sent to outside services. |
+| `DAILY_BUDGET` | Maximum lookups per day across all users (0 means unlimited). Protects your API quotas. |
+| `STATE_DIR` | Writable folder for the database and refreshed ATT&CK data. Point it at a persistent disk. |
+
+Notes:
+- Run **one** worker. The rate limiter, cache and counters live in memory.
+- Every lookup, analysis and search is written to the log with the client IP (`audit ip=...`). With no login, this is your record of who searched what.
+- Security headers are added automatically. Keep `ALLOWED_NETS` set on anything reachable from the internet.
+- Back up `STATE_DIR/threatlens.db` and test a restore once.
+
 ## Sources
 | Source | Types | Key needed |
 |---|---|---|

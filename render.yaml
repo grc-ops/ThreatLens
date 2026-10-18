@@ -1,0 +1,43 @@
+# Render Blueprint (field names checked against Render's published schema).
+# A persistent disk needs a paid instance; the free tier has no disk and sleeps.
+services:
+  - type: web
+    name: threatlens
+    runtime: docker
+    plan: starter
+    region: singapore          # closest Render region to India
+    healthCheckPath: /healthz
+    # Optional second layer: Render blocks other IPs before they reach the app.
+    # Uncomment and put your office / VPN public IPs here (needs a plan that supports it).
+    # ipAllowList:
+    #   - source: 203.0.113.10/32
+    #     description: office
+    disk:
+      name: threatlens-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: STATE_DIR
+        value: /var/data
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DAILY_BUDGET
+        value: "300"
+      - key: REQUIRE_ALLOWED_NETS
+        value: "1"           # refuse to start if ALLOWED_NETS is left empty
+      - key: ALLOWED_NETS
+        sync: false          # office / VPN public IPs, comma separated, e.g. 203.0.113.10
+      - key: NEVER_SEND_DOMAINS
+        sync: false          # your company domains
+      - key: VT_API_KEY
+        sync: false
+      - key: ABUSEIPDB_API_KEY
+        sync: false
+      - key: OTX_API_KEY
+        sync: false
+      - key: GREYNOISE_API_KEY
+        sync: false
+      - key: ABUSECH_API_KEY
+        sync: false
+      - key: PULSEDIVE_API_KEY
+        sync: false

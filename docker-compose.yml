@@ -1,0 +1,31 @@
+# VPS setup: the app is NOT published to the internet; only Caddy (HTTPS) is.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      STATE_DIR: /data
+      TRUST_PROXY: "1"          # one proxy (Caddy) in front
+    volumes:
+      - appdata:/data
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    depends_on:
+      - app
+
+volumes:
+  appdata:
+  caddydata:
